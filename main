@@ -1,0 +1,379 @@
+%% Elementary Computational Fluid Dynamics: Part 2:Incompressible Viscous
+
+%This code runs the finite difference method to solve the incompressible
+%viscous Navier-Stokes in a two dimenstional
+%square. There is a pressure difference between the left and right walls
+
+%This solver uses the non-dimensional form of the equations
+
+%% Clear Workspace
+clc
+clear
+%% The Variables
+%define how much time should be simulated
+sim_time = 0.05; %time in seconds
+
+%define the geometry of the square and flow
+Lx = 0.05; %characteristic length in meters, length of the width
+Ly = 0.05; %characteristic length in meters, of the height
+U = 1; %characteristic velocity in the flow
+RHO = 1.225; %characteristic density of the flow in kg/m^3
+G = 9.81; % characteristic gravitation acceleration in the flow in m/s^2
+mu = 1.81 * 10^-3; %viscousity
+
+%Define the size of the grid
+dx = 0.1; % dimensionless as a percentage of smaller of the height or width
+
+%Define timestep
+dt = 0.01; % dimensionless as a percentage of characteristic time.
+
+%Define the number of decimal places before truncation
+trunc = 8;
+
+%Define Boudary conditions (all bvelocities in m/s) 
+%(usually constrained to zero for no slip condition)d
+u_top = 0; % x-velocity on the top boundary
+u_bottom = 0; % x-velocity on the bottom boudary
+
+dpdx = 0.005; %pressure gradient in Pa/m;
+
+
+v_top = 0; % y - velocity on the top boundary
+v_bottom = 0; % y -velocity on the bottom boudary
+v_left =  0; % y - velocity on the left boundary
+v_right = 0; % y - velocity on the right boundary
+
+%Define Initial Conditions
+u = 0; % x - velocity inside the domain
+v = 0; % y - velocity inside the domain
+
+%% Create the Non-Dimensional Matrices
+%define the dimesions of the matrix that needs to be solved
+if Lx < Ly
+    xrowsize = round(1/dx);
+    yrowsize = round(Ly/(Lx * dx)); 
+else
+    xrowsize = round(Lx/(Ly * dx));
+    yrowsize = round(1/dx);
+end
+
+%Create the Reynolds Number
+if Lx < Ly
+    Re = (RHO * U * Lx)/mu;
+else
+    Re = (RHO * U * Ly)/mu;
+end
+
+
+%create gravity vector 
+g = ones(yrowsize,xrowsize,2);
+g(:,:,1) = 0* ones(yrowsize,xrowsize);
+if Lx < Ly  
+    g(:,:,2) = -G * Lx/U^2* ones(yrowsize,xrowsize);
+else
+    g(:,:,2) = -G * Ly/U^2 * ones(yrowsize,xrowsize);
+end
+
+%create pressure vector
+dp(:,:,1) = dpdx * ones(yrowsize,xrowsize);
+if Lx < Ly  
+    dp(:,:,2) = -G * Lx/U^2* ones(yrowsize,xrowsize);
+else
+    dp(:,:,2) = -G * Ly/U^2 * ones(yrowsize,xrowsize);
+end
+
+
+%create a dimensionless grid of the domain 
+x = dx/2:dx:dx*(xrowsize);
+y = dx/2:dx:dx*(yrowsize);
+[X,Y] = meshgrid(x,y);
+
+%create a dimesionless time vector
+if Lx < Ly
+    simtime = 0:dt:U/(Lx) * sim_time;
+else
+    simtime = 0:dt:U/(Ly) * sim_time;
+end
+
+%define nonsimenstional boudary vectors
+top = zeros(xrowsize,2);
+bottom = zeros(xrowsize,2);
+left = zeros(yrowsize,2);
+right = zeros(yrowsize,2);
+
+top(:,1) = u_top/U * ones(1,xrowsize);
+top(:,2)  = v_top/U * ones(1,xrowsize);
+
+
+bottom(:,1) = u_bottom/U * ones(1,xrowsize);
+bottom(:,2)= v_bottom/U * ones(1,xrowsize);
+
+
+left(:,1) = u/U * ones(1,yrowsize);
+left(:,2) = v_left/U * ones(1,yrowsize);
+
+
+right(:,1) = u/U * ones(1,yrowsize);
+right(:,2) = v_right/U * ones(1,yrowsize);
+
+
+%create initial conditions
+Values = zeros(yrowsize,xrowsize,2,length(simtime));
+Values(:,:,1,1) = u/U * ones(yrowsize,xrowsize); %x - velocity
+Values(:,:,2,1) = v/U * ones(yrowsize,xrowsize); % y-velocity
+
+
+
+% clear variables that aren't going to be used again as not to get confused
+% later
+clear p v u u_bottom u_top v_top v_bottom ...
+    v_left v_right p_left p_right sim_time
+
+%% Solve the Equations
+for tindex = 1:length(simtime)
+    M = Values(:,:,:,tindex);
+    [M,left,right] = rkmethod(xrowsize,yrowsize,...
+        top,bottom,left,right,M,x,y,dx,g,dp,dt,Re,trunc);
+    Values(:,:,:,tindex + 1) = M;
+    disp(tindex)
+end
+%% Plot the data
+figure(1)
+hold on
+for tindex = 1:length(simtime)
+    subplot (3,1,1)
+    imagesc(flip(Values(:,:,1,tindex)))
+    title('x-direction dimensionless velocity')
+    xlabel('dimensionless x-location')
+    ylabel('dimensionless y-location')
+    colorbar
+    subplot (3,1,2)
+    imagesc(flip(Values(:,:,2,tindex)))
+    title('y-direction dimensionless velocity')
+    xlabel('dimensionless y-location')
+    ylabel('dimensionless y-location')
+    colorbar
+    subplot (3,1,3)
+    quiver(X,Y,Values(:,:,1,tindex),Values(:,:,2,tindex))
+    title('dimensionless velocity')
+    xlabel('dimensionless y-location')
+    ylabel('dimensionless y-location')
+    colorbar
+    if Lx < Ly  
+        pause(dt *Lx/U)
+    else
+        pause(dt *Ly/U)
+    end
+        
+end
+hold off
+
+% ------------------------------------------------------------------------
+%% Functions
+%--------------------------------------------------------------------------
+%% Fourth-Order Runge-Kutta Method
+
+%This function uses the fourth-order Runge-Kutta method to sovle
+%returns the new quantities M, and the values at the left and right
+%boudaries
+function [M,left,right] = rkmethod(xrowsize,yrowsize,...
+   top,bottom,left,right,M,x,y,dx,g,dp,dt,Re,trunc)
+
+%Each time, the new values at each wall of the cell have to be calcualted
+%using the following function
+[NS1,EW1] = splinefit(xrowsize,yrowsize,top,bottom,left,right,M,x,y,dx);
+
+%%Determin the viscous stresses
+[NStau1,EWtau1] = stress(NS1,EW1,xrowsize,yrowsize,top,...
+    bottom,left,right,M,dx);
+tau1(:,:,1) = NStau1(2:end,:) - NStau1(1:end-1,:);
+tau1(:,:,2) = EWtau1(:,2:end) - EWtau1(:,1:end-1);
+
+
+%The transport equation for a finite gridcell is then used to caluclate the
+%change in each quantity within the gridcell per unit time
+dMdt1 = round (1/dx * (EW1(:,1:end-1,1).* EW1(:,1:end-1,:)...
+    - EW1(:,2:end,1).* EW1(:,1:end-1,:) ...
+    + NS1(1:end-1,:,2).* NS1(1:end-1,:,:)...
+    - NS1(2:end,:,2).* NS1(2:end,:,:)) - g + dp + (1/Re) * tau1/dx,trunc);
+
+%The value at half next time interval is caluculated using the gradient
+%determined above
+M1 = M + dMdt1 * dt/2;
+
+%The boundary conditions are then changed to fit the next time step
+left(:,1) = M1(:,1,1);
+right(:,1) = M1(:,end,1);
+
+%repreat process using the value of M1 determined above
+[NS2,EW2] = splinefit(xrowsize,yrowsize,top,bottom,left,right,M1,x,y,dx);
+
+%%Determin the viscous stresses
+[NStau2,EWtau2] = stress(NS2,EW2,xrowsize,yrowsize,top,...
+    bottom,left,right,M,dx);
+tau2(:,:,1) = NStau2(2:end,:) - NStau2(1:end-1,:);
+tau2(:,:,2) = EWtau2(:,2:end) - EWtau2(:,1:end-1);
+
+dMdt2 = round(1/dx * (EW2(:,1:end-1,1).* EW2(:,1:end-1,:)...
+    - EW2(:,2:end,1).* EW2(:,1:end-1,:) ...
+    + NS2(1:end-1,:,2).* NS2(1:end-1,:,:)...
+    - NS2(2:end,:,2).* NS2(2:end,:,:)) - g + dp + (1/Re) * tau2/dx,trunc);
+M2 = M + dMdt2 * dt/2;
+left(:,1) = M2(:,1,1);
+right(:,1) = M2(:,end,1);
+
+%repreat process uding the value of M2 determined above
+[NS3,EW3] = splinefit(xrowsize,yrowsize,top,bottom,left,right,M2,x,y,dx);
+
+%%Determin the viscous stresses
+[NStau3,EWtau3] = stress(NS3,EW3,xrowsize,yrowsize,top,...
+    bottom,left,right,M,dx);
+tau3(:,:,1) = NStau3(2:end,:) - NStau3(1:end-1,:);
+tau3(:,:,2) = EWtau3(:,2:end) - EWtau3(:,1:end-1);
+
+dMdt3 = round(1/dx * (EW3(:,1:end-1,1).* EW3(:,1:end-1,:)...
+    - EW3(:,2:end,1).* EW3(:,1:end-1,:) ...
+    + NS3(1:end-1,:,2).* NS3(1:end-1,:,:)...
+    - NS3(2:end,:,2).* NS3(2:end,:,:)) - g + dp + (1/Re) * tau3/dx,trunc);
+M3 = M + dMdt2 * dt; % M3 dertermined from a full timestep ahead
+left(:,1) = M3(:,1,1);
+right(:,1) = M3(:,end,1);
+
+%repreat process
+[NS4,EW4] = splinefit(xrowsize,yrowsize,top,bottom,left,right,M3,x,y,dx);
+
+%%Determin the viscous stresses
+[NStau4,EWtau4] = stress(NS4,EW4,xrowsize,yrowsize,top,...
+    bottom,left,right,M,dx);
+tau4(:,:,1) = NStau4(2:end,:) - NStau4(1:end-1,:);
+tau4(:,:,2) = EWtau4(:,2:end) - EWtau4(:,1:end-1);
+
+dMdt4 = round(1/dx * (EW4(:,1:end-1,1).* EW4(:,1:end-1,:)...
+    - EW4(:,2:end,1).* EW4(:,1:end-1,:) ...
+    + NS4(1:end-1,:,2).* NS4(1:end-1,:,:)...
+    - NS4(2:end,:,2).* NS4(2:end,:,:)) - g + dp + (1/Re) * tau4/dx,trunc);
+M = M + dt/6 * (dMdt1 + 2 * dMdt2 + 2 * dMdt3 + dMdt4);
+%change boundary condition at open section
+left(:,1) = M(:,1,1);
+right(:,1) = M(:,end,1);
+end
+
+%% Function to create Matricies ar the boundaries using splines
+function [NS,EW] = splinefit(xrowsize,yrowsize,...
+    top,bottom,left,right,M,x,y,dx)
+
+%make a matrix of the quantities at all the boundaries between gridcells
+NS = zeros(yrowsize + 1,xrowsize,2);
+EW = zeros(yrowsize,xrowsize + 1,2);
+
+%create the values at the boundary
+NS(end,:,:) = top;
+NS(1,:,:) = bottom;
+EW(:,1,:) = left;
+EW(:,end,:) = right;
+
+
+%internal locations
+xin = (dx * 1:xrowsize-1);
+yin = (dx * 1:yrowsize-1);
+
+%create the internal Value NS
+for xindex = 1:xrowsize
+    %create a 2d matrix of the values
+    yvalues = permute(M(:,xindex,:),[3 1 2 4]);
+    for yindex = 2:yrowsize
+        %fit a spline through the values to caluculate them at the boudary
+        NS(yindex,xindex,:) = ...
+            spline(y,yvalues,yin(yindex-1));
+    end 
+end
+%Create the internal vales EW
+for yindex = 1:yrowsize
+    %create a 2d matrix of the values
+    xvalues = permute(M(yindex,:,:),[3 2 1 4]);
+    for xindex = 2:xrowsize
+        %fit a spline through the values to caluculate them at the boudary
+        EW(yindex,xindex,:) = ...
+            spline(x,xvalues,xin(xindex-1));
+    end 
+end
+end
+%% Create the viscous stresses
+% This function returns the shear stress on the NS and EW boundaries of the
+% each gridcell using the model of a Newtownian fluid
+function [NStau,EWtau] = stress(NS,EW,xrowsize,yrowsize,top,...
+    bottom,left,right,Value,dx)
+[NSdx, EWdx,NSdy, EWdy] = FCBdiff(NS,EW,xrowsize,yrowsize,top,...
+    bottom,left,right,Value,dx);
+NStau = NSdx(:,:,2) + NSdy(:,:,1); 
+EWtau = EWdx(:,:,2) + EWdy(:,:,1);
+end
+%% Create derivative values inside the domain
+
+%This functions returns the directional derivatives of the values at the NS 
+% and EW boundaries of the gridcells using the forwaard center backward
+% finite difference method
+function [NSdx, EWdx,NSdy, EWdy] = FCBdiff(NS,EW,xrowsize,yrowsize,top,...
+    bottom,left,right,Value,dx)
+
+NSdx = zeros(yrowsize + 1,xrowsize,2);
+EWdx = zeros(yrowsize,xrowsize + 1,2);
+NSdy = zeros(yrowsize + 1,xrowsize,2);
+EWdy = zeros(yrowsize,xrowsize + 1,2);
+
+%solve for the values on the N E S W sides of each cell
+%Use forward-center-backward-difference method
+
+%Calculate change y derivatives at the NS boundaries of the gridcell
+for yindex = 1:yrowsize + 1
+    if yindex == 1 %forward
+    	NSdy(yindex,:,:) = (permute(Value(yindex,:,:),[2 3 1]) - bottom)...
+            /(1/2 *dx);
+    elseif yindex == yrowsize + 1 %backward
+        NSdy(yindex,:,:) = (top - permute(Value(yindex-1,:,:),[2 3 1]))...
+            /(1/2 * dx);
+    else %center
+        NSdy(yindex,:,:) = (permute(Value(yindex,:,:),[2 3 1])...
+            - permute(Value(yindex-1,:,:),[2 3 1]))/dx;
+    end
+end
+
+%Calculate change x derivatives at the NS boundaries of the gridcell
+for xindex = 1:xrowsize
+    if xindex == 1 %forward
+    	NSdx(:,xindex,:) = NS(:,xindex + 1,:) - NS(:,xindex,:)...
+            /(dx);
+    elseif xindex == xrowsize %backward
+        NSdx(:,xindex,:) = NS(:,xindex,:) - NS(:,xindex - 1,:)/...
+            (dx);
+    else %center
+        NSdx(:,xindex,:) = NS(:,xindex + 1,:) - NS(:,xindex - 1,:)/(2 * dx);
+    end
+end 
+
+%Calculate change x derivatives at the EW boundaries of the gridcell
+for xindex = 1:xrowsize + 1
+    if xindex == 1 %forward
+    	EWdx(:,xindex,:) = (permute(Value(:,xindex,:),[1 3 2]) - left)...
+            /(2 * dx);
+    elseif xindex == xrowsize + 1 %backward
+        EWdx(:,xindex,:) = (right - permute(Value(:,xindex-1,:),[1 3 2]))/(2 * dx);
+    else %center
+        EWdx(:,xindex,:) = (permute(Value(:,xindex,:),[1 3 2])...
+            - permute(Value(:,xindex-1,:),[1 3 2]))/dx;
+    end
+end 
+
+%Calculate change y derivatives at the EW boundaries of the gridcell
+for yindex = 1:yrowsize
+    if yindex == 1 %forward
+    	EWdy(yindex,:,:) = EW(yindex + 1,:,:) - EW(yindex,:,:)...
+            /(dx);
+    elseif yindex == yrowsize %backward
+        EWdy(yindex,:,:) = EW(yindex,:,:) - EW(yindex - 1,:,:)/...
+            (dx);
+    else %center
+        EWdy(yindex,:,:) = EW(yindex + 1,:,:) - EW(yindex - 1,:,:)/(2 * dx);
+    end
+end 
+end  
